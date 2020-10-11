@@ -1,29 +1,56 @@
 import socket
 import threading
+import uuid
+import logging
 
-bind_ip = "0.0.0.0"
-bind_port = 9999
+from ..common.packet import Packet, Command
 
-server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-server.bind((bind_ip, bind_port))
+class Server():
 
-# max server backlog == 5
-server.listen(5)
+    def __init__(self, ip="0.0.0.0", port=9999, owner=None):
+        self.bind_ip = ip
+        self.bind_port = port
+        self.owner = owner
+        self.__clients = []
+        self.__commands = {Command.TRANSMIT: self._transmit, Command.ADDCLIENT: self._add_client}
 
-print(f"[ * ] Listening on {bind_ip}:{bind_port}")
+    def _add_client(self, packet):
+        pass
 
-def handle_client(client_socket):
+    def _transmit(self, packet):
+        pass
 
-    request = client_socket.recv(1024)
+    def run(self):
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-    client_socket.send("ack")
+        server.bind((self.bind_ip, self.bind_port))
 
-    client_socket.close()
+        # max server backlog == 5
+        server.listen(5)
 
-while True:
-    client, addr = server.accept()
-    print(f"[ * ] Accepted connection from {addr[0]}:{addr[1]}")
+        logging.info(f"[ * ] Listening on {self.bind_ip}:{self.bind_port}")
 
-    client_handler = threading.Thread(target=handle_client, args=(client,))
-    client_handler.start()
+        def handle_client(client_socket):
+
+            bit_size = client_socket.recv(16)
+            size = int(bit_size, 2)
+
+            if size > 12:
+                remaining_size = size - 12
+                remaining_bits = client_socket.recv(remaining_size)
+
+            pack = Packet()
+            pack.from_bytes(remaining_bits)
+            pack.decrypt()
+
+            self.__commands[pack.command](pack)
+
+            client_socket.close()
+
+        while True:
+            client, addr = server.accept()
+            logging.info(f"[ * ] Accepted connection from {addr[0]}:{addr[1]}")
+
+            client_handler = threading.Thread(target=handle_client, args=(client,))
+            client_handler.start()
