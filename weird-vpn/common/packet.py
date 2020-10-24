@@ -19,10 +19,13 @@ class Packet():
     def __init__(self):
         pass
 
-    def from_bytes(self, bytes):
+    def from_bytes(self, data):
         pass
 
-    def encrypt_payload(self):
+    def encrypt_key(self):
+        pass
+
+    def encrypt_payload(self, data, key):
         # TODO: encrypt self.payload here
         pass
 
@@ -35,7 +38,7 @@ class Packet():
     def encrypt(self):
         pass
 
-    def build(self):
+    def build(self, public_key, symmetric_key, sharing_key=False):
         # first sixteen bits is the packet size
         meta_length = 16
 
@@ -46,12 +49,13 @@ class Packet():
             meta_length += 128
 
         remaining_data = self.payload
+        remaining_size = self.max_size - meta_length
         while len(remaining_data) != 0:
-            if len(remaining_data) > (self.max_size - meta_length):
-                packet_data = remaining_data[:self.max_size - meta_length]
-                remaining_data = remaining_data[self.max_size - meta_length:]
+            if len(remaining_data) > remaining_size:
+                packet_data = remaining_data[:remaining_size]
+                remaining_data = remaining_data[remaining_size:]
             else:
-                packet_data = remaining_data
+                packet_data = remaining_data + (b'0' * remaining_size)
                 remaining_data = b''
 
             # Create header information for server
@@ -62,6 +66,10 @@ class Packet():
             packet += (0).to_bytes(1) # Server commands
 
             # Add payload data
+            if sharing_key:
+                packet_data = self.encrypt_key()
+            else:
+                packet_data = self.encrypt_payload()
             packet += packet_data
 
             # TODO: whole packet encryption here
