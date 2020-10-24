@@ -1,6 +1,13 @@
 import uuid
 import enum
 
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.serialization import PublicFormat
+from cryptography.hazmat.primitives.serialization import Encoding
+from cryptography.hazmat.primitives import serialization
 
 class Command(enum.Enum):
     TRANSMIT = 0
@@ -22,7 +29,10 @@ class Packet():
     def from_bytes(self, data):
         pass
 
-    def encrypt_key(self):
+    def encrypt_key(self, data, key):
+        pass
+
+    def decrypt_key(self, key):
         pass
 
     def encrypt_payload(self, data, key):
