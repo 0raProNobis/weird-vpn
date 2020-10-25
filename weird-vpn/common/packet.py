@@ -1,5 +1,7 @@
 import uuid
 import enum
+from rsaDecrypt import *
+from rsaEncrypt import *
 
 
 class Command(enum.Enum):
@@ -37,7 +39,17 @@ class Packet():
 
     def encrypt(self):
         pass
-
+    
+    def rsa_encrypt(packetToEncrypt,nameFileToSaveTo,rsaPublicFile,rsaPrivateFile,nameOfSigFileToSave):
+        #encrypts data using rsa, variable names temporary to add clarity, can change to whatever
+        #see rsaEncrypt.py for more details
+        encrypt(packetToEncrypt,nameFileToSaveTo,rsaPublicFile,rsaPrivateFile,nameOfSigFileToSave)
+        
+    def rsa_decrypt(encryptFileName,SigName,rsaPublicFile,rsaPrivateFile,saveFileName):
+        #decrypts rsa, variable names temporary to add clarity, can change to whatever
+        #see rsaDecrypt.py for more details
+        decrypt(encryptFileName,SigName,rsaPublicFile,rsaPrivateFile,saveFileName)
+        
     def build(self, public_key, symmetric_key, sharing_key=False):
         # first sixteen bits is the packet size
         meta_length = 16
