@@ -1,6 +1,15 @@
 import uuid
 import enum
+from rsaDecrypt import *
+from rsaEncrypt import *
 
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.serialization import PublicFormat
+from cryptography.hazmat.primitives.serialization import Encoding
+from cryptography.hazmat.primitives import serialization
 
 class Command(enum.Enum):
     TRANSMIT = 0
@@ -33,6 +42,7 @@ class Packet():
     def trim_payload(self):
         pass
 
+
     def from_bytes(self, data):
         self.sender = uuid.UUID(bytes=data[:17])
         self.receiver = uuid.UUID(bytes=data[17:33])
@@ -42,7 +52,10 @@ class Packet():
                             Command.QUERYCLIENTS, Command.QUERYMAILBOX]:
             self.trim_payload()
 
-    def encrypt_key(self):
+    def encrypt_key(self, data, key):
+        pass
+
+    def decrypt_key(self, key):
         pass
 
     def encrypt_payload(self, data, key):
@@ -57,8 +70,18 @@ class Packet():
 
     def encrypt(self):
         pass
-
-    def build(self):
+    
+    def rsa_encrypt(packetToEncrypt,nameFileToSaveTo,rsaPublicFile,rsaPrivateFile,nameOfSigFileToSave):
+        #encrypts data using rsa, variable names temporary to add clarity, can change to whatever
+        #see rsaEncrypt.py for more details
+        encrypt(packetToEncrypt,nameFileToSaveTo,rsaPublicFile,rsaPrivateFile,nameOfSigFileToSave)
+        
+    def rsa_decrypt(encryptFileName,SigName,rsaPublicFile,rsaPrivateFile,saveFileName):
+        #decrypts rsa, variable names temporary to add clarity, can change to whatever
+        #see rsaDecrypt.py for more details
+        decrypt(encryptFileName,SigName,rsaPublicFile,rsaPrivateFile,saveFileName)
+        
+    def build(self, public_key, symmetric_key, sharing_key=False):
         # Sender and receiver should be 128 bit UUIDs
         meta_length = 256
 

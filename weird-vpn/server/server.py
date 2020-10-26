@@ -7,6 +7,7 @@ import threading
 
 ### From ..common/packet.py
 import uuid
+
 import enum
 
 
@@ -98,6 +99,11 @@ class Packet():
             yield packet
 ###
 
+import logging
+from cryptography.hazmat.primitives.asymmetric import rsa
+
+
+
 
 class Server():
 
@@ -124,6 +130,7 @@ class Server():
         Ignore the request
         '''
         pass
+
 
     def __createadmissionkey(self):
         '''
@@ -192,6 +199,16 @@ class Server():
     def _send(self, sock, packet: Packet):
         for p in packet.build():
             sock.send(p)
+
+    def _transmit(self, packet):
+        pass
+    
+    def decryptHeader(encrypted_header):
+        #should decrypt the header with RSA 
+        #has a complemtary encryptHeader on the server
+        #https://cryptography.io/en/latest/hazmat/primitives/asymmetric/rsa/
+        return decryptedHeader
+
 
     def run(self):
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
