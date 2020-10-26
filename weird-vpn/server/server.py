@@ -2,7 +2,7 @@ import socket
 import threading
 import uuid
 import logging
-
+from cryptography.hazmat.primitives.asymmetric import rsa
 from ..common.packet import Packet, Command
 
 
@@ -20,6 +20,12 @@ class Server():
 
     def _transmit(self, packet):
         pass
+    
+    def decryptHeader(encrypted_header):
+        #should decrypt the header with RSA 
+        #has a complemtary encryptHeader on the server
+        #https://cryptography.io/en/latest/hazmat/primitives/asymmetric/rsa/
+        return decryptedHeader
 
     def run(self):
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
