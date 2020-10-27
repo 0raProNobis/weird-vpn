@@ -16,7 +16,7 @@ class RSAHelper:
     __privkey = None
 
     def pubkey2pem(self):
-        pem = self.__pubkey.public_bytes(
+        pem = self.pubkey.public_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         )
@@ -54,7 +54,7 @@ class RSAHelper:
         )
         return signature, ciphertext
 
-    def decrypt(self, ciphertext):
+    def decrypt(self, ciphertext: bytes):
         plaintext = self.__privkey.decrypt(
             ciphertext,
             apadding.OAEP(
@@ -63,9 +63,8 @@ class RSAHelper:
                 label=None
             )
         )
-        return plaintext
 
-    def verify(self, message: bytes, signature, otherkey: rsa.RSAPublicKey):
+    def verify(self, plaintext: bytes, signature, otherkey: rsa.RSAPublicKey):
         otherkey.verify(
             signature,
             plaintext,
@@ -75,6 +74,7 @@ class RSAHelper:
             ),
             hashes.SHA256()
         )
+        return plaintext
 
 
 class AESHelper:
@@ -165,16 +165,4 @@ class ECHelper:
         verified = rsa.verify(decryptedMessage, signature, pubkey)
 
         return verified, decryptedMessage
-
-
-ec1 = ECHelper()
-ec1.generatekeys()
-
-other = ECHelper()
-other.generatekeys()
-
-ec1.generatesharedkey(other.pubkey)
-other.generatesharedkey(ec1.pubkey)
-
-print(ec1.derivedkey == other.derivedkey)
 
