@@ -1,7 +1,8 @@
-import sys
 import os
+import sys
 import socket
 import argparse
+from cryptohelper import RSAHelper, AESHelper, ECHelper
 
 
 ### From common/packet.py
@@ -20,20 +21,15 @@ class Command(enum.Enum):
     QUERYMAILBOX = 7
     FAIL = 8
 
-
 class Packet():
 
-    sender = uuid.UUID() # set to random UUID, should be overwritten
-    receiver = uuid.UUID() # set to random UUID, should be overwritten
+    sender = uuid.uuid4() # set to random UUID, should be overwritten
+    receiver = uuid.uuid4() # set to random UUID, should be overwritten
     payload = b''
-    max_size = 65536 # maximum number for two byte integer, which we use for the length field
+    max_size = 256 # maximum number for two byte integer, which we use for the length field
     command = Command.TRANSMIT
-    skey = None
-    akey_pub = None
-    akey_priv = None
-    ekey_pub = None
-    ekey_priv = None
-
+    aes: AESHelper = None
+    rsa: RSAHelper = None
 
     def __init__(self):
         pass
@@ -42,10 +38,11 @@ class Packet():
         pass
 
     def from_bytes(self, data):
-        self.sender = uuid.UUID(bytes=data[:17])
-        self.receiver = uuid.UUID(bytes=data[17:33])
-        self.command = Command(int(data[33:34]))
-        self.payload = data[34:]
+        print("from_bytes")
+        self.sender = uuid.UUID(bytes=data[:16])
+        self.receiver = uuid.UUID(bytes=data[16:32])
+        self.command = Command(int.from_bytes(data[32:33], 'big'))
+        self.payload = data[33:]
         if self.command in [Command.ADDCLIENT, Command.REGISTER,
                             Command.QUERYCLIENTS, Command.QUERYMAILBOX]:
             self.trim_payload()
@@ -53,9 +50,9 @@ class Packet():
     def encrypt_key(self):
         pass
 
-    def encrypt_payload(self, data, key):
+    def encrypt_payload(self, data):
         # TODO: encrypt self.payload here
-        pass
+        return data
 
     def decrypt_payload(self):
         pass
@@ -66,16 +63,20 @@ class Packet():
     def encrypt(self):
         pass
 
-    def build(self):
+    def build(self, server=False, encrypt=True):
         # Sender and receiver should be 128 bit UUIDs
-        meta_length = 256
+        meta_length = 33
 
         remaining_data = self.payload
         remaining_size = self.max_size - meta_length
         base_packet = b''
-        base_packet += self.sender.bytes()
-        base_packet += self.receiver.bytes()
-        base_packet += self.command.to_bytes(1) # Server commands
+        base_packet += self.sender.bytes
+        base_packet += self.receiver.bytes
+        base_packet += self.command.value.to_bytes(1, 'big') # Server commands
+        if self.command != Command.REGISTER:
+            packet = basepacket + remaining_data
+            remaining_data = 0
+            yield packet
         while len(remaining_data) != 0:
             if len(remaining_data) > remaining_size:
                 packet_data = remaining_data[:remaining_size]
@@ -89,112 +90,60 @@ class Packet():
 
             # Add payload data
             if self.command == Command.SHAREKEY:
-                packet_data = self.encrypt_key()
+                packet += self.encrypt_key(packet_data)
+            elif encrypt and not server:
+                packet += self.encrypt_payload(packet_data)
             else:
-                packet_data = self.encrypt_payload()
-            packet += packet_data
+                packet += packet_data
 
-            # TODO: whole packet encryption here
+            if encrypt:
+                packet = self.encrypt(packet)
             yield packet
 ###
 
-from ..common import packet
-
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec, rsa
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.serialization import PublicFormat
-from cryptography.hazmat.primitives.serialization import Encoding
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-
-
-
 class Client():
     isowner = False
-    elliptic_key_private = None
-    elliptic_key_shared = None
+    __rsacrypt = None
+    __aesmapping = {}
 
     def __init__(self, server_host="127.0.0.1", server_port=9999):
         self.server_host = "127.0.0.1"
         self.port = 9999
-        self.owner = False
-        self.serveruuid = uuid.UUID(int=0)
+
+        self.isowner = False
+        self.owneruuid = None
+        self.serveruuid = uuid.UUID(bytes=b'\x00'*16)
         self.__client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.uuid = uuid.UUID()
+        self.uuid = uuid.uuid4()
         self.config = self.load_config('oddball.config')
+        self.rsa = RSAHelper()
+        self.rsa.generateKeys()
 
     def load_config(self, flepath):
         pass
-    
-    def sendMessage(server,port,recipient,message): #call made by the user to send a message. Should give us everything we need to to send a message.
-        header = encryptHeader(recipient)
-        completePayload = encryptPayload(message)
-        #toDo send to server
-        client.connect((target_host, target_port))
-        client.send("message")
         
-    def checkMessages:
+    def checkMessages(self):
         #checks for messages on server, return int #n of messages
-        
-    def fetchMessages:
-        #gets the messages from the server
-        
-    def encryptHeader(recipient):
-        #should generate and encrypt a header with RSA 
-        #has a complemtary decryptHeader on the server
-        #https://cryptography.io/en/latest/hazmat/primitives/asymmetric/rsa/
-        return encryptedHeader
-        
-    def encryptPayload(message):
-        key = 
-        iv= os.urandom(16)
-
-
-    def generate_elliptic_key(self):
-        private_key = ec.generate_private_key(ec.SECP384R1(), default_backend())
-        public_key = private_key.public_key()
-        return private_key, public_key
-
-    def share_symmetric_key(self, target):
-        private_key, public_key = self.generate_elliptic_key()
-        public_bytes = public_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
-        public_str = server_bytes.decode()
-
-        print(f"Your public key is:\n {public_str}\n\n")
-        other_pem = input(f"What is the other device's public key? ")
-
-        other_pem = serialization.load_pem_public_key(server_bytes_str.encode(), backend=default_backend())
-        shared_key = server_private_key.exchange(
-            ec.ECDH(), other_pem
-        )
-        if self.isowner:
-            new_packet = packet.Packet()
-        else:
-            self.elliptic_key_shared = shared_key
-            self.elliptic_key_private = private_key
-
-    def process_key_share(self):
         pass
-
-
-
-
-
+        
+    def fetchMessages(self):
+        #gets the messages from the server
+        pass
 
     def send(self, packet: Packet):
         self.__client.connect((self.server_host, self.port))
-        for p in packet.build():
-            self.__client.client.send(p)
-        resp = self.recv()
+        for p in packet.build(encrypt=(packet.command != Command.REGISTER)):
+            self.__client.send(p)
+        resp = self.recv(encrypt=(packet.command != Command.REGISTER))
         return resp
 
-    def recv(self):
-        self.__client.connect((self.server_host, self.port))
-        d = self.__client.recv(65536)
+    def recv(self, encrypt=True):
+        d = self.__client.recv(256)
         packet = Packet()
-        packet.from_bytes(d)
+        if encrypt:
+            pass
+        else:
+            packet.from_bytes(d)
         return packet
 
     def buildpacket(self):
@@ -207,10 +156,15 @@ class Client():
 
     def register(self):
         key = input("What is the registration key the server provided? ")
+        while len(key) != 6:
+            key = '0' + key
         p = self.buildpacket()
         p.command = Command.REGISTER
         p.receiver = self.serveruuid
-        p.payload = key.to_bytes()
+        p.payload = key.encode() + self.rsa.pubkey2pem()
+        print(key.encode())
+        print(self.rsa.pubkey2pem())
+        print(len(p.payload))
         resp = self.send(p)
         if resp.command == Command.ACK:
             self.serveruuid = resp.sender
@@ -236,25 +190,7 @@ class Client():
     def receive(self):
         p = self.buildpacket()
         p.command = Command.RECEIVE
-        '''
-        cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
-        encryptor = cipher.encryptor()
-        cipherText = encryptor.update(message) + encryptor.finalize()
-        ivAndCipherText = iv + cipherText
-        return ivAndCipherText
-        '''
-        
 
-
-        
-    def decryptPayload(completePayload):
-        key = 
-        iv= completePayload[0:16]
-        
-        cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
-        decryptor = cipher.decryptor()
-        plainText = decryptor.update(completePayload) + decryptor.finalize()
-        return plainText
 
 
 

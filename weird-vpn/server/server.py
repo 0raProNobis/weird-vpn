@@ -1,9 +1,10 @@
+import time
 import uuid
 import socket
 import random
 import logging
-import datetime
 import threading
+from cryptohelper import RSAHelper
 
 ### From ..common/packet.py
 import uuid
@@ -20,21 +21,19 @@ class Command(enum.Enum):
     SHAREKEY = 5
     QUERYCLIENTS = 6
     QUERYMAILBOX = 7
+    FAIL = 8
+    SHAREPUB = 9
 
 
 class Packet():
 
-    sender = uuid.UUID() # set to random UUID, should be overwritten
-    receiver = uuid.UUID() # set to random UUID, should be overwritten
+    sender = uuid.uuid4() # set to random UUID, should be overwritten
+    receiver = uuid.uuid4() # set to random UUID, should be overwritten
     payload = b''
-    max_size = 65536 # maximum number for two byte integer, which we use for the length field
+    max_size = 256 # maximum number for two byte integer, which we use for the length field
     command = Command.TRANSMIT
-    skey = None
-    akey_pub = None
-    akey_priv = None
-    ekey_pub = None
-    ekey_priv = None
-
+    aes = None
+    rsa: RSAHelper = None
 
     def __init__(self):
         pass
@@ -43,40 +42,44 @@ class Packet():
         pass
 
     def from_bytes(self, data):
-        self.sender = uuid.UUID(bytes=data[:17])
-        self.receiver = uuid.UUID(bytes=data[17:33])
-        self.command = Command(int(data[33:34]))
-        self.payload = data[34:]
+        print("from_bytes")
+        self.sender = uuid.UUID(bytes=data[:16])
+        self.receiver = uuid.UUID(bytes=data[16:32])
+        self.command = Command(int.from_bytes(data[32:33], 'big'))
+        self.payload = data[33:]
         if self.command in [Command.ADDCLIENT, Command.REGISTER,
                             Command.QUERYCLIENTS, Command.QUERYMAILBOX]:
             self.trim_payload()
 
-    def encrypt_key(self):
-        pass
+    def encrypt_payload(self, data):
+        # TODO: encrypt data here with AES
+        return data
 
-    def encrypt_payload(self, data, key):
-        # TODO: encrypt self.payload here
-        pass
+    def decrypt_payload(self, data):
+        return data
 
-    def decrypt_payload(self):
-        pass
+    def decrypt(self, data, decryptpayload=True):
+        data = self.rsa.decrypt(data)
+        if decryptpayload:
+            payload = data[33:]
+            payload = self.decrypt_payload(payload)
+            data = data[:33] + payload
+        return data
 
-    def decrypt(self):
-        pass
+    def encrypt(self, data):
+        # TODO: encrypt whole packet with receiver's pub key
+        return data
 
-    def encrypt(self):
-        pass
-
-    def build(self):
+    def build(self, server=False, encrypt=True):
         # Sender and receiver should be 128 bit UUIDs
-        meta_length = 256
+        meta_length = 33
 
         remaining_data = self.payload
         remaining_size = self.max_size - meta_length
         base_packet = b''
-        base_packet += self.sender.bytes()
-        base_packet += self.receiver.bytes()
-        base_packet += self.command.to_bytes(1) # Server commands
+        base_packet += self.sender.bytes
+        base_packet += self.receiver.bytes
+        base_packet += self.command.value.to_bytes(1, 'big') # Server commands
         while len(remaining_data) != 0:
             if len(remaining_data) > remaining_size:
                 packet_data = remaining_data[:remaining_size]
@@ -90,30 +93,26 @@ class Packet():
 
             # Add payload data
             if self.command == Command.SHAREKEY:
-                packet_data = self.encrypt_key()
+                packet += self.encrypt_key(packet_data)
+            elif encrypt and not server:
+                packet += self.encrypt_payload(packet_data)
             else:
-                packet_data = self.encrypt_payload()
-            packet += packet_data
+                packet += packet_data
 
-            # TODO: whole packet encryption here
+            if encrypt:
+                packet = self.encrypt(packet)
             yield packet
 ###
-
-import logging
-from cryptography.hazmat.primitives.asymmetric import rsa
-
-
-
 
 class Server():
 
     def __init__(self, ip="0.0.0.0", port=9999, owner=None):
         self.bind_ip = ip
         self.bind_port = port
-        self.uuid = uuid.UUID()
+        self.uuid = uuid.uuid4()
         self.__owner = owner
         self.__admissionkeys = {}
-        self.__clients = []
+        self.__clients = {}
         self.__uuiddns = {}
         self.__mailboxes = {}
         self.__commands = {
@@ -124,6 +123,8 @@ class Server():
             Command.ACK: self._swallow,
             Command.RECEIVE: self._receive,
         }
+        self.serverrsa = RSAHelper()
+        self.serverrsa.generateKeys()
 
     def _swallow(self, packet: Packet):
         '''
@@ -131,14 +132,13 @@ class Server():
         '''
         pass
 
-
     def __createadmissionkey(self):
         '''
         An admission key consists of the key itself (an integer between 0 and one million)
         and the expiration time (5 minutes after creation)
         '''
         key = random.randint(0, 999999)
-        ts = datetime.datetime.timestamp() + 300
+        ts = time.time() + 300
         key = str(key)
         while len(key) < 6:
             key = '0' + key
@@ -166,10 +166,11 @@ class Server():
         return check
 
     def _transmit(self, packet: Packet):
-        p = None
+        p = self__generate_ack(packet)
+        p.command = Command.FAIL
         if self.__verify_packet(packet) and packet.receiver != self.uuid:
             self.__mailboxes[packet.receiver].append(packet)
-            p = self.__generate_ack(packet)
+            p.command = Command.ACK
         return p
 
     def __generate_ack(self, packet: Packet):
@@ -177,7 +178,8 @@ class Server():
         p.receiver = packet.sender
         p.sender = self.uuid
         p.command = Command.ACK
-        p.payload = (1).to_bytes(1)
+        p.rsa = self.serverrsa
+        p.payload = (1).to_bytes(1, 'big')
         return p
 
     def _register(self, packet: Packet):
@@ -185,62 +187,69 @@ class Server():
         Checks if key provided is register already.
         If so, and if the key hasn't expired, adds the client as a new client and removes the key
         '''
-        key = packet.payload[0:7]
-        p = None
-        if key in self.__admissionkeys.keys() and self.__admissionkeys[key] > datetime.datetime.timestamp():
+        key = packet.payload[0:6].decode()
+        print(key)
+        p = self.__generate_ack(packet)
+        p.command = Command.FAIL
+        if key in self.__admissionkeys.keys() and self.__admissionkeys[key] > time.time():
             self.__admissionkeys.pop(key)
-            common_name = packet.payload[7:]
-            self.__clients.append(packet.sender)
-            self.__uuiddns[common_name] = packet.sender
+            pem = packet.payload[6:]
+            print(pem)
+            self.__clients[packet.sender] = self.serverrsa.pem2key(pem)
             self.__mailboxes[packet.sender] = []
-            p = self.__generate_ack(packet)
+            p.command = Command.ACK
         return p
 
     def _send(self, sock, packet: Packet):
-        for p in packet.build():
+        for p in packet.build(server=True):
             sock.send(p)
 
-    def _transmit(self, packet):
+    def _receive(self, packet):
         pass
-    
-    def decryptHeader(encrypted_header):
-        #should decrypt the header with RSA 
-        #has a complemtary encryptHeader on the server
-        #https://cryptography.io/en/latest/hazmat/primitives/asymmetric/rsa/
-        return decryptedHeader
-
 
     def run(self):
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
         server.bind((self.bind_ip, self.bind_port))
 
+        key = self.__createadmissionkey()
+        print(f"[ * ] Listening on {self.bind_ip}:{self.bind_port}")
+        print(f"[ * ] Owner registration key: {key}")
+
         # max server backlog == 5
         server.listen(5)
-
-        logging.info(f"[ * ] Listening on {self.bind_ip}:{self.bind_port}")
-
         def handle_client(client_socket):
-
-            bit_size = client_socket.recv(16)
-            size = int(bit_size, 2)
-
-            if size > 12:
-                remaining_size = size - 12
-                remaining_bits = client_socket.recv(remaining_size)
+            bytes = client_socket.recv(512)
 
             pack = Packet()
-            pack.from_bytes(remaining_bits)
-            pack.decrypt()
+            pack.rsa = self.serverrsa
+            sig = bytes[256]
+            try:
+                bytes = pack.decrypt(bytes, decryptpayload=False)
+                self.serverrsa.verify(sig, bytes)
+                pack.from_bytes(bytes)
 
-            resp = self.__commands[pack.command](pack)
-            self._send(client_socket, resp)
+            except ValueError:
+                print("REgister")
+                pack.from_bytes(bytes)
+                if pack.command != Command.REGISTER:
+                    client_socket.close()
+                    return
+                more_bytes = client_socket.recv(228)
+                pack.payload += more_bytes
+
+            if self.__verify_packet(pack) or pack.command == Command.REGISTER:
+                resp = self.__commands[pack.command](pack)
+                self._send(client_socket, resp)
 
             client_socket.close()
 
         while True:
             client, addr = server.accept()
-            logging.info(f"[ * ] Accepted connection from {addr[0]}:{addr[1]}")
+            print(f"[ * ] Accepted connection from {addr[0]}:{addr[1]}")
 
             client_handler = threading.Thread(target=handle_client, args=(client,))
             client_handler.start()
+
+serv = Server()
+serv.run()
