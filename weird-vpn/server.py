@@ -32,7 +32,7 @@ class Server():
         self.serverrsa = RSAHelper()
         self.serverrsa.generateKeys()
 
-    def _swallow(self, packet: Packet):
+    def _swallow(self, packet: Packet, sock=None):
         '''
         Ignore the request
         '''
@@ -51,15 +51,17 @@ class Server():
         self.__admissionkeys[key] = ts
         return key
 
-    def _add_client(self, packet: Packet):
+    def _add_client(self, packet: Packet, sock=None):
         '''
         Can only be called by the owner.
         Server generates a key and returns it for the new client to use
         '''
-        p = None
-        if packet.sender == self.__owner:
-            p = self.__generate_ack()
-            p.payload = key.to_bytes()
+        p = self.__generate_ack(packet)
+        p.command = Command.FAIL
+        if packet.sender == self.__owneruuid:
+            p.command = Command.ACK
+            key = self.__createadmissionkey()
+            p.payload = key.encode()
         return p
 
     def __verify_packet(self, packet: Packet):
@@ -71,10 +73,10 @@ class Server():
         check &= packet.sender in self.__clients
         return check
 
-    def _transmit(self, packet: Packet):
-        p = self__generate_ack(packet)
+    def _transmit(self, packet: Packet, sock=None):
+        p = self.__generate_ack(packet)
         p.command = Command.FAIL
-        if self.__verify_packet(packet) and packet.receiver != self.uuid:
+        if packet.receiver != self.uuid:
             self.__mailboxes[packet.receiver].append(packet)
             p.command = Command.ACK
         return p
@@ -85,23 +87,23 @@ class Server():
         p.sender = self.uuid
         p.command = Command.ACK
         p.rsa = self.serverrsa
+        if packet.sender in self.__clients.keys():
+            p.pubkey = self.__clients[packet.sender]
         p.payload = (1).to_bytes(1, 'big')
         return p
 
-    def _register(self, packet: Packet):
+    def _register(self, packet: Packet, sock=None):
         '''
         Checks if key provided is register already.
         If so, and if the key hasn't expired, adds the client as a new client and removes the key
         '''
         key = packet.payload[0:6].decode()
-        print(key)
         p = self.__generate_ack(packet)
         p.command = Command.FAIL
         if key in self.__admissionkeys.keys() and self.__admissionkeys[key] > time.time():
             notifyowner = True
             self.__admissionkeys.pop(key)
             pem = packet.payload[6:]
-            print(pem)
             self.__clients[packet.sender] = self.serverrsa.pem2key(pem)
             self.__mailboxes[packet.sender] = []
             p.command = Command.SHAREPUB
@@ -115,7 +117,7 @@ class Server():
                 p2.command = Command.SHAREKEY
                 p2.receiver = self.__owneruuid
                 p2.payload = packet.sender.bytes
-                self._transmit(p2)
+                self.__mailboxes[self.__owneruuid].append(p2)
 
         return p
 
@@ -123,8 +125,19 @@ class Server():
         for p in packet.build(server=True):
             sock.send(p)
 
-    def _receive(self, packet):
-        pass
+    def _receive(self, packet, sock=None):
+        queue = self.__mailboxes[packet.sender]
+        p = self.__generate_ack(packet)
+        p.command = Command.QUERYMAILBOX
+        p.payload = len(queue).to_bytes(8, 'big')
+        self._send(sock, p)
+        count = len(queue)
+        for i in range(count):
+            pack = queue.pop(0)
+            if pack is None:
+                return
+            pack.pubkey = self.__clients[packet.sender]
+            self._send(sock, pack)
 
     def sig_kill(self, sig, frame):
         self.server.close()
@@ -144,27 +157,27 @@ class Server():
         self.server.listen(5)
         def handle_client(client_socket):
             bytes = client_socket.recv(512)
-
             pack = Packet()
             pack.rsa = self.serverrsa
             sig = bytes[:256]
             try:
-                bytes = pack.decrypt(bytes[256:], decryptpayload=False)
-                self.serverrsa.verify(sig, bytes)
+                bytes = pack.decrypt(bytes[256:])
                 pack.from_bytes(bytes)
 
+                # Not working for some reason
+                self.serverrsa.verify(bytes, sig, self.__clients[pack.sender])
+
+
             except ValueError:
-                print("Register")
                 pack.from_bytes(bytes)
                 if pack.command != Command.REGISTER:
                     client_socket.close()
                     return
-                #more_bytes = client_socket.recvall()
-                #pack.payload += more_bytes
 
             if self.__verify_packet(pack) or pack.command == Command.REGISTER:
-                resp = self.__commands[pack.command](pack)
-                self._send(client_socket, resp)
+                resp = self.__commands[pack.command](pack, sock=client_socket)
+                if resp is not None:
+                    self._send(client_socket, resp)
 
             client_socket.close()
 

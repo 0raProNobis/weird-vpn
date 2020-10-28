@@ -15,6 +15,14 @@ class RSAHelper:
     pubkey = None
     __privkey = None
 
+    @classmethod
+    def pub2pem(cls, pubkey):
+        pem = pubkey.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        return pem
+
     def pubkey2pem(self):
         pem = self.pubkey.public_bytes(
             encoding=serialization.Encoding.PEM,
@@ -52,7 +60,7 @@ class RSAHelper:
                 label=None
             )
         )
-        return signature, ciphertext
+        return signature + ciphertext
 
     def decrypt(self, ciphertext: bytes):
         plaintext = self.__privkey.decrypt(
@@ -63,6 +71,7 @@ class RSAHelper:
                 label=None
             )
         )
+        return plaintext
 
     def verify(self, plaintext: bytes, signature, otherkey: rsa.RSAPublicKey):
         otherkey.verify(
@@ -74,8 +83,21 @@ class RSAHelper:
             ),
             hashes.SHA256()
         )
-        return plaintext
 
+    def dumpprivkey(self):
+        pem = self.__privkey.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption()
+        )
+        return pem
+
+    def loadfromprivpem(self, pem):
+        self.__privkey = serialization.load_pem_private_key(
+            pem,
+            password=None
+        )
+        self.pubkey = self.__privkey.public_key()
 
 class AESHelper:
 
@@ -109,9 +131,10 @@ class AESHelper:
 
     def decrypt(self, crypto: bytes):
         iv = crypto[0:16]
+        ciphertext = crypto[16:]
         cipher = Cipher(algorithms.AES(self.__key), modes.CBC(iv))
         decryptor = cipher.decryptor()
-        plaintext = decryptor.update(crypto[16:]) + decryptor.finalize()
+        plaintext = decryptor.update(ciphertext) + decryptor.finalize()
         plaintext = self.__unpad(plaintext)
         return plaintext
 
@@ -140,16 +163,14 @@ class ECHelper:
     def pubkey(self, key):
         self.__pubkey = key
 
-    def pem2key(self, pem: str):
-        return serialization.load_pem_public_key(pem.encode(), backend=default_backend())
+    def pem2key(self, pem: bytes):
+        return serialization.load_pem_public_key(pem, backend=default_backend())
 
-    def generatesharedkey(self, pem: str):
-        # print(f"Your public key is:\n {public_str}\n\n")
-        # other_pem = input(f"What is the other device's public key? ")
+    def generatesharedkey(self, pem: bytes):
         self.sharedkey = self.__privkey.exchange(ec.ECDH(), self.pem2key(pem))
         self.derivedkey = HKDF(
             algorithm=hashes.SHA256(),
-            length=32,
+            length=16,
             salt=None,
             info=b'key exchange'
         ).derive(self.sharedkey)
@@ -165,4 +186,3 @@ class ECHelper:
         verified = rsa.verify(decryptedMessage, signature, pubkey)
 
         return verified, decryptedMessage
-
