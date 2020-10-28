@@ -2,32 +2,67 @@ import os
 import sys
 import uuid
 import socket
+import pickle
 import argparse
 
-from cryptohelper import RSAHelper, AESHelper, ECHelper
 from packet import Command, Packet
+from cryptohelper import RSAHelper, AESHelper, ECHelper
+
+
+class ClientMap():
+
+    def __init__(self, other: Client):
+        self.isowner = other.isowner
+        self.owneruuid = other.owneruuid
+        self.serveruuid = other.serveruuid
+        self.uuid = other.uuid
+        self.rsa = self.__rsacrypt.dumpprivkey()
+        self.aes = other.aes
+
 
 
 class Client():
     isowner = False
-    __rsacrypt = None
+    __rsacrypt: RSAHelper = None
     __aesmapping = {}
+    __rsapem = None
 
     def __init__(self, server_host="127.0.0.1", server_port=9999):
         self.server_host = "127.0.0.1"
         self.port = 9999
+        self._filepath = './client.pkl'
+        self.__client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        if os.path.exists(self._filepath):
+            try:
+                self.load()
+            except EOFError:
+                self.setdefault()
+        else:
+            self.setdefault()
 
+    def setdefault(self):
         self.isowner = False
         self.owneruuid = None
         self.serveruuid = uuid.UUID(bytes=b'\x00'*16)
-        self.__client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.uuid = uuid.uuid4()
-        self.config = self.load_config('oddball.config')
-        self.rsa = RSAHelper()
-        self.rsa.generateKeys()
+        self.__rsacrypt = RSAHelper()
+        self.__rsacrypt.generateKeys()
 
-    def load_config(self, flepath):
-        pass
+    def load(self):
+        with open(self._filepath, 'rb') as fle:
+            other = pickle.load(fle)
+        self.isowner = other.isowner
+        self.owneruuid = other.owneruuid
+        self.serveruuid = other.serveruuid
+        self.uuid = other.uuid
+        self.__rsacrypt = RSAHelper()
+        self.__rsacrypt.loadfromprivpem(other.rsa)
+        self.aes = other.aes
+
+    def save(self):
+        mapping = ClientMap(self)
+        with open(self._filepath, 'wb') as fle:
+            pickle.dump(mapping, fle)
         
     def checkMessages(self):
         #checks for messages on server, return int #n of messages
@@ -79,6 +114,7 @@ class Client():
             pass
         else:
             pass
+        self.save()
 
     def transmit(self, recipient, message: str):
         message = message.to_bytes()
@@ -98,6 +134,5 @@ class Client():
         p = self.buildpacket()
         p.command = Command.RECEIVE
 
-
-
-
+    def __del__(self):
+        self.save()
